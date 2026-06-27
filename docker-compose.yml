@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  toolgate:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - toolgate_data:/data
+    environment:
+      TOOLGATE_DB_PATH: /data/toolgate.db
+      # Auth header env vars — set these before running
+      # PINELABS_AUTH_TOKEN: "Bearer your-token-here"
+      # PINELABS_MERCHANT_ID: "your-merchant-id"
+    restart: unless-stopped
+
+volumes:
+  toolgate_data:
