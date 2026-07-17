@@ -349,11 +349,13 @@ This is closer to real prod traffic. Without this, you'd never test the refund/r
 
 ---
 
-## URLs (Hardcoded to IN Staging)
+## URLs (entered at runtime)
+
+Callback URLs are entered in the UI — nothing is hardcoded.
 
 ```
-AUTH:   https://main.apis.volopay.site/api/v1/callbacks/pinelabs-authorize
-NOTIF:  https://main.apis.volopay.site/api/v1/callbacks/pinelabs-txn-notifications
+AUTH:   https://<host>/api/v1/callbacks/pinelabs-authorize
+NOTIF:  https://<host>/api/v1/callbacks/pinelabs-txn-notifications
 ```
 
 ---

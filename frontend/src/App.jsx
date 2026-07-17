@@ -4,10 +4,10 @@ import AirwallexPage from "./pages/AirwallexPage";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { WallClockChart } from "./components/WallClockChart";
 
-const STAGING_AUTH_URL =
-  "https://main.apis.volopay.site/api/v1/callbacks/pinelabs-authorize";
-const STAGING_NOTIF_URL =
-  "https://main.apis.volopay.site/api/v1/callbacks/pinelabs-txn-notifications";
+const AUTH_URL_PLACEHOLDER =
+  "https://<host>/api/v1/callbacks/pinelabs-authorize";
+const NOTIF_URL_PLACEHOLDER =
+  "https://<host>/api/v1/callbacks/pinelabs-txn-notifications";
 
 const MCC_LABELS = {
   "0000": "UPI personal",
@@ -754,8 +754,8 @@ function ProgressBar({ done, total, isRunning }) {
 
 export default function App() {
   const [page, setPage] = useState("pinelabs");
-  const [authUrl, setAuthUrl] = useState(STAGING_AUTH_URL);
-  const [notifUrl, setNotifUrl] = useState(STAGING_NOTIF_URL);
+  const [authUrl, setAuthUrl] = useState("");
+  const [notifUrl, setNotifUrl] = useState("");
   const [notifUrlManual, setNotifUrlManual] = useState(true);
   const [authHeadersText, setAuthHeadersText] = useState("");
   const [callbackType, setCallbackType] = useState("both");
