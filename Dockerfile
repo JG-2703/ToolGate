@@ -29,4 +29,5 @@ ENV TOOLGATE_DB_PATH=/data/toolgate.db
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Shell form so $PORT (set by Render/other PaaS) expands; falls back to 8000 locally.
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
