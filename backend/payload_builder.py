@@ -32,6 +32,46 @@ NOTIF_MESSAGES = {
     "txn_id_failed":     "Transaction Id check failed.",
 }
 
+# Real Indian merchant names (name, city) for realistic randomized payloads.
+INDIAN_MERCHANTS = [
+    ("RAPIDO", "BANGALORE"),
+    ("OLA CABS", "BANGALORE"),
+    ("UBER INDIA", "GURGAON"),
+    ("SWIGGY", "BANGALORE"),
+    ("ZOMATO", "GURGAON"),
+    ("FLIPKART", "BANGALORE"),
+    ("AMAZON INDIA", "BANGALORE"),
+    ("MYNTRA", "BANGALORE"),
+    ("BIGBASKET", "BANGALORE"),
+    ("BLINKIT", "GURGAON"),
+    ("ZEPTO", "MUMBAI"),
+    ("DUNZO", "BANGALORE"),
+    ("RELIANCE FRESH", "MUMBAI"),
+    ("DMART", "MUMBAI"),
+    ("MORE SUPERMARKET", "BANGALORE"),
+    ("TATA CLIQ", "MUMBAI"),
+    ("NYKAA", "MUMBAI"),
+    ("MAKEMYTRIP", "GURGAON"),
+    ("IRCTC", "NEW DELHI"),
+    ("REDBUS", "BANGALORE"),
+    ("BOOKMYSHOW", "MUMBAI"),
+    ("PHONEPE", "PUNE"),
+    ("PAYTM", "NOIDA"),
+    ("APOLLO PHARMACY", "CHENNAI"),
+    ("CROMA", "MUMBAI"),
+    ("LENSKART", "GURGAON"),
+    ("URBAN COMPANY", "GURGAON"),
+    ("HALDIRAM", "NEW DELHI"),
+    ("CAFE COFFEE DAY", "BANGALORE"),
+    ("DECATHLON INDIA", "BANGALORE"),
+]
+
+
+def gen_merchant() -> tuple[str, str]:
+    """Random (merchantName, city) from Indian merchant list."""
+    return random.choice(INDIAN_MERCHANTS)
+
+
 DECLINE_REASON_WEIGHTS = {
     "low_account_balance":       0.773,
     "low_card_balance":          0.190,
@@ -74,6 +114,7 @@ def gen_transfer_balance() -> float:
 
 def build_card_auth(card_ref: str, rrn: str, amount: float, txn_unique_id: int, mcc: str = "6011") -> dict:
     """Card authorization payload. amount in rupees."""
+    merchant_name, merchant_city = gen_merchant()
     return {
         "accountDetails": None,
         "cardDetail": {
@@ -91,9 +132,9 @@ def build_card_auth(card_ref: str, rrn: str, amount: float, txn_unique_id: int, 
             "referenceNumber": str(card_ref),
         },
         "merchantDetail": {
-            "city": "BANGALORE",
+            "city": merchant_city,
             "mcc": str(mcc),
-            "merchantName": "VOLOPAY TEST MERCHANT",
+            "merchantName": merchant_name,
             "mid": "000hdfc70039908",
             "payeeVPA": None,
             "tId": "70039908",
@@ -129,6 +170,7 @@ def build_card_notification(
     message: str = "Transaction successful.",
 ) -> dict:
     """Card notification payload. amount in rupees (same as auth — no unit conversion)."""
+    merchant_name, merchant_city = gen_merchant()
     return {
         "accountDetails": None,
         "cardDetail": {
@@ -146,9 +188,9 @@ def build_card_notification(
             "referenceNumber": str(card_ref),
         },
         "merchantDetail": {
-            "city": "BANGALORE",
+            "city": merchant_city,
             "mcc": str(mcc),
-            "merchantName": "VOLOPAY TEST MERCHANT",
+            "merchantName": merchant_name,
             "mid": "000hdfc70039908",
             "payeeVPA": None,
             "tId": "70039908",
@@ -191,6 +233,10 @@ def build_upi_auth(payee_vpa: str, amount: float, txn_unique_id: int, mcc: str =
     mcc='0000' → personal P2P (Volopay should block).
     mcc != '0000' → merchant P2M (Volopay should allow).
     """
+    if str(mcc) == "0000":
+        merchant_name, merchant_city = None, None
+    else:
+        merchant_name, merchant_city = gen_merchant()
     return {
         "accountDetails": None,
         "cardDetail": {
@@ -204,9 +250,9 @@ def build_upi_auth(payee_vpa: str, amount: float, txn_unique_id: int, mcc: str =
             "referenceNumber": reference_number,
         },
         "merchantDetail": {
-            "city": None,
+            "city": merchant_city,
             "mcc": str(mcc),
-            "merchantName": None,
+            "merchantName": merchant_name,
             "mid": None,
             "payeeVPA": payee_vpa,
             "tId": None,
@@ -243,6 +289,10 @@ def build_upi_notification(
 ) -> dict:
     """UPI notification payload. amount in rupees (same as auth — no conversion)."""
     embedded_rrn = gen_rrn()
+    if str(mcc) == "0000":
+        merchant_name, merchant_city = None, None
+    else:
+        merchant_name, merchant_city = gen_merchant()
     return {
         "accountDetails": None,
         "cardDetail": {
@@ -256,9 +306,9 @@ def build_upi_notification(
             "referenceNumber": None,
         },
         "merchantDetail": {
-            "city": None,
+            "city": merchant_city,
             "mcc": str(mcc),
-            "merchantName": None,
+            "merchantName": merchant_name,
             "mid": None,
             "payeeVPA": payee_vpa,
             "tId": None,
