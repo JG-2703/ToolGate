@@ -36,11 +36,23 @@ CREATE TABLE IF NOT EXISTS samples (
 """
 
 
+CREATE_USERS = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'client',
+    created_at REAL NOT NULL
+)
+"""
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_RUNS)
         await db.execute(CREATE_SAMPLES)
+        await db.execute(CREATE_USERS)
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_samples_run ON samples(run_id, step)"
         )
@@ -50,6 +62,64 @@ async def init_db():
         except Exception:
             pass
         await db.commit()
+
+
+# ── Users ────────────────────────────────────────────────────────────────────
+
+async def create_user(username: str, password_hash: str, role: str = "client") -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
+            (username, password_hash, role, time.time()),
+        )
+        await db.commit()
+        return {"id": cur.lastrowid, "username": username, "role": role}
+
+
+async def get_user_by_username(username: str) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE username=?", (username,)) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE id=?", (user_id,)) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_users() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, username, role, created_at FROM users ORDER BY created_at"
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def delete_user(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        await db.commit()
+
+
+async def count_users() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+async def count_admins() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users WHERE role='admin'") as cur:
+            row = await cur.fetchone()
+    return row[0] if row else 0
 
 
 async def create_run(run_id: str, profile_id: str, config: dict) -> dict:

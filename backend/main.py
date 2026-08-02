@@ -9,21 +9,33 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
+import auth
 import engine
 import airwallex_engine
 import models
+import scenario
 from metrics import compute_metrics_snapshot, compute_txn_latency_series
 
 STATIC_DIR = Path(__file__).parent / "static"
-app = FastAPI(title="ToolGate", docs_url="/api/docs")
+# Swagger/OpenAPI disabled in prod (avoids endpoint enumeration + live console).
+app = FastAPI(
+    title="ToolGate",
+    docs_url=None if auth.IS_PROD else "/api/docs",
+    redoc_url=None,
+    openapi_url=None if auth.IS_PROD else "/openapi.json",
+)
 
 connected_ws: set[WebSocket] = set()
 _current_run_id: Optional[str] = None
+
+# Role guards (reusable dependencies)
+require_admin = auth.require_role("admin")
+require_user = auth.require_role("admin", "client")
 
 
 async def broadcast(msg: dict):
@@ -39,6 +51,137 @@ async def broadcast(msg: dict):
 @app.on_event("startup")
 async def startup():
     await models.init_db()
+    await auth.seed_admin()
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "client"
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    if auth.login_rate_limited(f"ip:{ip}", f"user:{req.username}"):
+        raise HTTPException(429, "Too many login attempts. Try again later.")
+    user = await models.get_user_by_username(req.username)
+    if not user or not auth.verify_password(req.password, user["password_hash"]):
+        raise HTTPException(401, "Invalid username or password")
+    auth.login_reset(f"ip:{ip}", f"user:{req.username}")
+    token = auth.issue_token(user)
+    response.set_cookie(
+        key=auth.COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=auth.IS_PROD,     # HTTPS-only in prod; off for localhost dev
+        samesite="strict",
+        max_age=auth.JWT_TTL_SECONDS,
+        path="/",
+    )
+    return {"username": user["username"], "role": user["role"]}
+
+
+@app.post("/api/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def me(user: dict = Depends(auth.current_user)):
+    return user
+
+
+@app.get("/api/users")
+async def api_list_users(user: dict = Depends(require_admin)):
+    return await models.list_users()
+
+
+@app.post("/api/users")
+async def api_create_user(req: CreateUserRequest, user: dict = Depends(require_admin)):
+    if req.role not in ("admin", "client"):
+        raise HTTPException(400, "role must be admin or client")
+    if await models.get_user_by_username(req.username):
+        raise HTTPException(409, "username already exists")
+    return await models.create_user(req.username, auth.hash_password(req.password), req.role)
+
+
+@app.delete("/api/users/{user_id}")
+async def api_delete_user(user_id: int, user: dict = Depends(require_admin)):
+    if user_id == user["id"]:
+        raise HTTPException(400, "cannot delete yourself")
+    target = await models.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "user not found")
+    # Never let the last admin be removed (lockout guard).
+    if target["role"] == "admin" and await models.count_admins() <= 1:
+        raise HTTPException(400, "cannot delete the last admin")
+    await models.delete_user(user_id)
+    return {"ok": True}
+
+
+# ── PineLabs expense scenario (create / settle / decline / refund) ─────────────
+
+class ScenarioRequest(BaseModel):
+    scenario: str                      # create | settle | decline | refund
+    auth_url: Optional[str] = None     # omitted in client mode → server env default
+    notification_url: Optional[str] = None
+    auth_headers: dict = {}
+    txn_type: str = "card"             # card | upi
+    amount: float = Field(5000, ge=0, le=100_000_000)
+    mcc: str = Field("6011", max_length=8)
+    merchant_name: str = Field("", max_length=100)
+    card_ref: str = Field("", max_length=64)
+    payee_vpa: str = Field("", max_length=128)
+    upi_txn_type: str = "P2P"
+    upi_card_number: str = Field("", max_length=32)
+
+    @field_validator("scenario")
+    @classmethod
+    def _valid_scenario(cls, v):
+        if v not in ("create", "settle", "decline", "refund"):
+            raise ValueError("scenario must be create|settle|decline|refund")
+        return v
+
+    @field_validator("txn_type")
+    @classmethod
+    def _valid_txn_type(cls, v):
+        if v not in ("card", "upi"):
+            raise ValueError("txn_type must be card|upi")
+        return v
+
+    @field_validator("mcc")
+    @classmethod
+    def _valid_mcc(cls, v):
+        if v and not (v.isdigit() and len(v) == 4):
+            raise ValueError("mcc must be 4 digits")
+        return v
+
+
+@app.post("/api/pinelabs/scenario")
+async def api_pinelabs_scenario(req: ScenarioRequest, user: dict = Depends(require_user)):
+    config = req.model_dump()
+    # SSRF guard. Client role NEVER controls the target — force server-configured
+    # URLs and drop any caller-supplied headers. Admin may override the URL but
+    # only to an allowlisted host.
+    if user["role"] != "admin":
+        config["auth_url"] = None            # scenario.run_scenario → env default
+        config["notification_url"] = None
+        config["auth_headers"] = {}
+    else:
+        for key in ("auth_url", "notification_url"):
+            val = config.get(key)
+            if val and not auth.is_allowed_target_url(val):
+                raise HTTPException(400, f"{key} host is not allowlisted")
+    return await scenario.run_scenario(config)
 
 
 # ── Dry run ────────────────────────────────────────────────────────────────────
@@ -104,20 +247,30 @@ class AirwallexStartRunRequest(BaseModel):
     success_rate: float = 95
     deadline_ms: float = 3000.0
 
+def _check_target(*urls: Optional[str]):
+    """Reject any non-allowlisted / internal target URL (SSRF guard)."""
+    for u in urls:
+        if u and not auth.is_allowed_target_url(u):
+            raise HTTPException(400, "target URL host is not allowlisted")
+
+
 @app.post("/api/dry-run")
-async def api_dry_run(req: DryRunRequest):
+async def api_dry_run(req: DryRunRequest, user: dict = Depends(require_admin)):
     config = req.model_dump()
+    _check_target(config.get("auth_url"), config.get("notification_url"))
     result = await engine.dry_run(config)
     return result
 
 @app.post("/api/airwallex/dry-run")
-async def api_airwallex_dry_run(req: AirwallexDryRunRequest):
+async def api_airwallex_dry_run(req: AirwallexDryRunRequest, user: dict = Depends(require_admin)):
     config = req.model_dump()
+    _check_target(config.get("auth_url"))
     return await airwallex_engine.dry_run(config)
 
 @app.post("/api/airwallex/single-step")
-async def api_airwallex_single_step(req: AirwallexSingleRequest):
+async def api_airwallex_single_step(req: AirwallexSingleRequest, user: dict = Depends(require_admin)):
     """Send a single Airwallex step and return the payload + response."""
+    _check_target(req.url)
     import httpx
     import time
     from airwallex_payload_builder import (
@@ -278,12 +431,13 @@ class AirwallexSendClearingRequest(BaseModel):
     transaction_id: str = ""
 
 @app.post("/api/airwallex/send-clearing")
-async def api_airwallex_send_clearing(req: AirwallexSendClearingRequest):
+async def api_airwallex_send_clearing(req: AirwallexSendClearingRequest, user: dict = Depends(require_admin)):
     """Manually send a clearing notification for an existing transaction."""
     import httpx
     import time
     from airwallex_payload_builder import build_clearing_notification, build_merchant
 
+    _check_target(req.url)
     billing_currency = req.billing_currency or req.currency
 
     payload = build_clearing_notification(
@@ -368,13 +522,14 @@ class AirwallexStartRunRequest(BaseModel):
     deadline_ms: float = 3000.0
 
 @app.post("/api/runs/start")
-async def start_run(req: StartRunRequest):
+async def start_run(req: StartRunRequest, user: dict = Depends(require_admin)):
     global _current_run_id
 
     if engine.is_run_active():
         raise HTTPException(409, "A run is already in progress")
 
     config = req.model_dump()
+    _check_target(config.get("auth_url"), config.get("notification_url"))
     run_id = str(uuid.uuid4())
     _current_run_id = run_id
     await models.create_run(run_id, "pinelabs", config)
@@ -401,13 +556,14 @@ async def start_run(req: StartRunRequest):
     return {"run_id": run_id}
 
 @app.post("/api/airwallex/runs/start")
-async def start_airwallex_run(req: AirwallexStartRunRequest):
+async def start_airwallex_run(req: AirwallexStartRunRequest, user: dict = Depends(require_admin)):
     global _current_run_id
 
     if airwallex_engine.is_run_active():
         raise HTTPException(409, "An Airwallex run is already in progress")
 
     config = req.model_dump()
+    _check_target(config.get("auth_url"))
 
     run_id = str(uuid.uuid4())
     _current_run_id = run_id
@@ -486,7 +642,7 @@ async def start_airwallex_run(req: AirwallexStartRunRequest):
     }
 
 @app.post("/api/runs/{run_id}/stop")
-async def stop_run(run_id: str):
+async def stop_run(run_id: str, user: dict = Depends(require_admin)):
     if not engine.is_run_active():
         raise HTTPException(400, "No run is active")
     engine.cancel_current_run()
@@ -494,12 +650,12 @@ async def stop_run(run_id: str):
 
 
 @app.get("/api/runs/active")
-async def get_active():
+async def get_active(user: dict = Depends(require_admin)):
     return {"active": engine.is_run_active(), "run_id": _current_run_id}
 
 
 @app.get("/api/runs")
-async def list_runs():
+async def list_runs(user: dict = Depends(require_admin)):
     rows = await models.list_runs()
     result = []
     for r in rows:
@@ -511,7 +667,7 @@ async def list_runs():
 
 
 @app.get("/api/runs/{run_id}")
-async def get_run(run_id: str):
+async def get_run(run_id: str, user: dict = Depends(require_admin)):
     r = await models.get_run(run_id)
     if not r:
         raise HTTPException(404, "Run not found")
@@ -522,7 +678,7 @@ async def get_run(run_id: str):
 
 
 @app.get("/api/runs/{run_id}/metrics")
-async def get_run_metrics(run_id: str):
+async def get_run_metrics(run_id: str, user: dict = Depends(require_admin)):
     r = await models.get_run(run_id)
     if not r:
         raise HTTPException(404, "Run not found")
@@ -536,7 +692,7 @@ async def get_run_metrics(run_id: str):
 
 
 @app.get("/api/runs/{run_id}/export")
-async def export_run(run_id: str, format: str = "json"):
+async def export_run(run_id: str, format: str = "json", user: dict = Depends(require_admin)):
     r = await models.get_run(run_id)
     if not r:
         raise HTTPException(404, "Run not found")
@@ -593,6 +749,13 @@ async def export_run(run_id: str, format: str = "json"):
 
 @app.websocket("/ws/metrics")
 async def ws_metrics(ws: WebSocket):
+    # Metrics stream is an admin-only feature — authenticate the session cookie
+    # before accepting the connection.
+    token = ws.cookies.get(auth.COOKIE_NAME)
+    claims = auth.decode_token(token) if token else None
+    if not claims or claims.get("role") != "admin":
+        await ws.close(code=1008)  # policy violation
+        return
     await ws.accept()
     connected_ws.add(ws)
     try:
