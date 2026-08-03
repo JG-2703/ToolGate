@@ -55,6 +55,27 @@ The notification finds the expense created by the auth via a shared reference.
 
 ---
 
+## 3a. Unique IDs — `transactionUniqueId` vs `notificationUniqueId`
+
+Two different id fields, two different jobs. Getting these wrong is the #1 cause
+of a settle silently doing nothing or returning `"webhook already present"`.
+
+| Field | Where | Rule |
+|---|---|---|
+| `transactionUniqueId` | top-level + in `transactionDetail` | **Same across auth + notification** for one expense. **Rotates per expense** — a new value for every new transaction. For UPI it's also the link key. |
+| `notificationUniqueId` | notification only | **Unique per webhook.** The backend dedups on it forever — a repeat returns `{ "message": "webhook already present" }` and never processes. |
+
+So per expense: pick **one** `transactionUniqueId`, reuse it in auth + settle
+(+ refund), and mint a **fresh** `notificationUniqueId` for each notification.
+
+**ID format:** real PineLabs ids are ~**10 digits**. Any id must also fit a
+signed 64-bit bigint (max `9_223_372_036_854_775_807`, 19 digits) — an id longer
+than that overflows/truncates in the DB and collides, which itself triggers the
+"already present" error. ToolGate generates a random 10-digit id per call and
+guards against in-process repeats (`gen_txn_unique_id`, `backend/payload_builder.py`).
+
+---
+
 ## 4. Card vs UPI detection
 
 Decided purely by `cardDetail.referenceNumber`:
@@ -250,3 +271,58 @@ wiring scenarios (both currently wrong in the load-test `child_notif` path,
 
 Decline can't be forced from the payload — surface it in the UI as "requires a
 card/limit configured to reject."
+
+---
+
+## 12. How ToolGate implements the simulation (as built)
+
+The ToolGate simulator (`backend/scenario.py`, endpoint `POST /api/pinelabs/scenario`)
+fires the real callbacks for a chosen scenario. This is the working
+implementation of everything above.
+
+### Per-scenario steps
+| Scenario | Steps fired (in order) | Notes |
+|---|---|---|
+| `create` | auth | Leaves expense unsettled. |
+| `settle` | auth → **wait** → settle | |
+| `refund` | auth → **wait** → settle → **wait** → refund | |
+| `decline` | auth (expected to be rejected) | `ok` = auth returned non-2xx. |
+
+### The important mechanics (learned the hard way)
+
+1. **One `transactionUniqueId` per run, reused across steps.** Generated once at
+   the start of the run and passed to auth + settle + refund. A new run gets a
+   new id → rotates per expense. (`scenario.py`, `txn_unique_id`)
+
+2. **Fresh `notificationUniqueId` per notification.** Each settle/refund mints
+   its own via a separate `gen_txn_unique_id()` call. Never reused. Prevents
+   "webhook already present".
+
+3. **10-digit, bigint-safe, unique ids.** See §3a. Oversized ids were the actual
+   cause of the "already present" error in early builds — they overflowed the
+   bigint column and collided.
+
+4. **Wait between auth and settle.** The auth's expense is created by an **async**
+   job (`PinelabsGenerateExpenseJob`). A settle that arrives before that job runs
+   finds no expense and silently does nothing. ToolGate sleeps
+   `TOOLGATE_SETTLE_DELAY_SEC` (default **3s**) before settling/refunding.
+   (`scenario.py`, `SETTLE_DELAY_SEC`)
+
+5. **Card amount in paise.** Card auth reads `transactionAmount` as paise; card
+   settle divides by 100. ToolGate sends the card **notification** amount as
+   `amount × 100` so auth and settle reconcile. UPI amount is sent as-is.
+   (`scenario.py` settle/refund steps)
+
+6. **Refund type by rail.** Card refund → `17`, UPI refund → `23` (§8).
+
+7. **UPI settle carries `approvalCode`.** Added on the UPI debit notification or
+   the expense reverses instead of settling (§5).
+
+8. **Callback URLs by role.** In client mode the URLs come from server config
+   (`TOOLGATE_PINELABS_AUTH_URL` / `TOOLGATE_PINELABS_NOTIF_URL`) and the client
+   never sees or overrides them; admins may override to an allow-listed host.
+
+### Result shape
+Each run returns `{ ok, scenario, txn_type, link_key, steps[] }`, where each step
+carries the exact payload sent, the HTTP status, latency, and the response body —
+so the operator sees precisely what fired and what the backend returned.

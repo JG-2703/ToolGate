@@ -86,8 +86,26 @@ def gen_rrn() -> str:
     return str(random.randint(100_000_000_000, 999_999_999_999))
 
 
+# Monotonic clock for id generation. transactionUniqueId and notificationUniqueId
+# are BOTH stored in Volopay's WebhookDatum.provider_id and deduped FOREVER — a
+# repeat anywhere in history returns "webhook already present". So ids must be
+# globally unique across process restarts, not just within one run.
+_last_uid = 0
+
+
 def gen_txn_unique_id() -> int:
-    return int(time.time() * 1000) + random.randint(0, 9999)
+    # Time-based + monotonic: milliseconds-since-epoch in the high digits (never
+    # repeats across restarts, always increasing) plus a strictly-incrementing
+    # low part so ids minted in the same millisecond still differ. ~16 digits,
+    # well within signed bigint (max 9_223_372_036_854_775_807, 19 digits).
+    # Matches how real PineLabs ids look (time-derived) and can never collide
+    # with a previously-issued id.
+    global _last_uid
+    uid = int(time.time() * 1000) * 1000  # ms-time, 3 zero low digits to fill
+    if uid <= _last_uid:
+        uid = _last_uid + 1
+    _last_uid = uid
+    return uid
 
 
 def gen_batch_id() -> int:
@@ -215,6 +233,12 @@ def build_card_notification(
             "transactionId": gen_transaction_id(),
             "transactionMode": 3,
             "transactionTime": txn_time,
+            # v1 dedups the notification on transactionDetail.transactionUniqueId
+            # (NOT notificationUniqueId). Must be present + unique, else it derives
+            # nil and collides with the nil-provider_id row → "webhook already
+            # present". Use the fresh notification id here. (Card links to the auth
+            # expense via rrn, not this field.)
+            "transactionUniqueId": notification_unique_id,
             "transactionType": txn_type,
             "transferCardBalance": gen_transfer_balance(),
             "transferCardExpiry": "2030-07-09T00:00:00+05:30",
@@ -333,6 +357,10 @@ def build_upi_notification(
             "transactionId": gen_transaction_id(),
             "transactionMode": None,
             "transactionTime": txn_time,
+            # For UPI the backend allows the notification even when the auth id
+            # already exists (it re-creates the webhook), so the shared link-key
+            # txn id is fine here.
+            "transactionUniqueId": txn_unique_id,
             "transactionType": txn_type,
             "transferCardBalance": gen_transfer_balance(),
             "transferCardExpiry": "2030-07-09T00:00:00+05:30",

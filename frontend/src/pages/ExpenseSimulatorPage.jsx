@@ -385,7 +385,11 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
                 textTransform: "uppercase", letterSpacing: "0.08em",
               }}
             >
-              {result.ok ? "Simulation succeeded" : "Simulation did not fully succeed"}
+              {result.ok
+                ? (scenario === "settle" || scenario === "refund"
+                    ? "Callbacks sent — confirm in Volopay"
+                    : "Simulation succeeded")
+                : "Simulation did not fully succeed"}
             </span>
             {result.link_key && (
               <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "JetBrains Mono, monospace" }}>
