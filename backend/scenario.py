@@ -13,6 +13,7 @@ Scenarios (client-facing):
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime
@@ -22,6 +23,12 @@ import httpx
 # Client mode does not supply/see callback URLs — they come from env config.
 DEFAULT_AUTH_URL = os.environ.get("TOOLGATE_PINELABS_AUTH_URL", "")
 DEFAULT_NOTIF_URL = os.environ.get("TOOLGATE_PINELABS_NOTIF_URL", "")
+
+# The auth callback creates the expense ASYNCHRONOUSLY (PinelabsGenerateExpenseJob
+# on Sidekiq). A settle/refund notification that arrives before that job runs
+# finds no expense ("Expense not found") and silently does nothing. Wait between
+# the auth and the notification so the expense exists first.
+SETTLE_DELAY_SEC = float(os.environ.get("TOOLGATE_SETTLE_DELAY_SEC", "3.0"))
 
 from payload_builder import (
     build_card_auth, build_card_notification,
@@ -41,10 +48,13 @@ _STEPS = {
 }
 
 # Friendly, expense-language labels for the UI (no auth/notification jargon).
+# NOTE: a 2xx on settle/refund means the notification was ACCEPTED and queued —
+# the actual settlement runs in a downstream async worker inside Volopay, so we
+# say "requested", not "done". Confirm the final state in Volopay.
 STEP_LABELS = {
     "auth":    "Authorization - expense created",
-    "settle":  "Settlement - expense settled",
-    "refund":  "Refund - negative expense created",
+    "settle":  "Settlement requested - confirm status in Volopay",
+    "refund":  "Refund requested - confirm status in Volopay",
 }
 
 
@@ -59,8 +69,22 @@ async def _fire(client: httpx.AsyncClient, url: str, payload: dict, headers: dic
             body = r.json()
         except Exception:
             body = r.text[:2000]
-        return {
-            "ok": 200 <= r.status_code < 300,
+
+        # HTTP 2xx alone does NOT mean success. PineLabs returns 200 even on a
+        # decline; the real result is in the body:
+        #   auth: authorizationStatus == 0 approved, 1 declined (+ responseMessage)
+        # If auth is declined, no expense is created — so a following settle is
+        # pointless and would fail ("webhook already present" / not found).
+        http_ok = 200 <= r.status_code < 300
+        ok = http_ok
+        decline_reason = None
+        if isinstance(body, dict) and "authorizationStatus" in body:
+            ok = http_ok and int(body.get("authorizationStatus", 1)) == 0
+            if not ok:
+                decline_reason = body.get("responseMessage") or "declined"
+
+        result = {
+            "ok": ok,
             "step": step,
             "label": label,
             "status": r.status_code,
@@ -68,6 +92,9 @@ async def _fire(client: httpx.AsyncClient, url: str, payload: dict, headers: dic
             "payload": payload,
             "response": body,
         }
+        if decline_reason:
+            result["decline_reason"] = decline_reason
+        return result
     except Exception as exc:
         latency = round((time.monotonic() - t0) * 1000, 1)
         return {
@@ -137,9 +164,12 @@ async def run_scenario(config: dict) -> dict:
                     break
 
             elif step == "settle":
+                # Let the async expense-generation job finish before settling.
+                await asyncio.sleep(SETTLE_DELAY_SEC)
                 notif_uid = gen_txn_unique_id()
                 txn_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
                 if is_upi:
+                    # UPI settle amount is used as-is (rupees) by the backend.
                     payload = build_upi_notification(
                         payee_vpa, amount, txn_unique_id, notif_uid, txn_time,
                         upi_type, mcc,
@@ -151,8 +181,10 @@ async def run_scenario(config: dict) -> dict:
                     if merchant:
                         payload["merchantDetail"]["merchantName"] = merchant
                 else:
+                    # Card notification amount is in PAISE (backend divides by 100
+                    # to reconcile with the auth expense). Convert rupees → paise.
                     payload = build_card_notification(
-                        card_ref, rrn, amount, txn_unique_id, notif_uid, txn_time, mcc,
+                        card_ref, rrn, round(amount * 100), txn_unique_id, notif_uid, txn_time, mcc,
                         txn_type=int(TxnType.DEBIT), reason_code=0,
                         message="Transaction successful.",
                     )
@@ -164,6 +196,8 @@ async def run_scenario(config: dict) -> dict:
                     break
 
             elif step == "refund":
+                # Space out from the prior settle so its processing completes.
+                await asyncio.sleep(SETTLE_DELAY_SEC)
                 notif_uid = gen_txn_unique_id()
                 txn_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
                 # Refund type follows card-vs-UPI: 17 for card, 23 for UPI.
@@ -178,8 +212,9 @@ async def run_scenario(config: dict) -> dict:
                     if merchant:
                         payload["merchantDetail"]["merchantName"] = merchant
                 else:
+                    # Card notification amount is in PAISE (see settle note).
                     payload = build_card_notification(
-                        card_ref, rrn, amount, txn_unique_id, notif_uid, txn_time, mcc,
+                        card_ref, rrn, round(amount * 100), txn_unique_id, notif_uid, txn_time, mcc,
                         txn_type=refund_type, reason_code=0,
                         message="Transaction is already cancelled.",
                     )
@@ -198,6 +233,10 @@ async def run_scenario(config: dict) -> dict:
     else:
         overall_ok = all(r["ok"] for r in results) and bool(results)
         note = None
+        if scenario in ("settle", "refund"):
+            note = ("Callbacks were accepted (HTTP 2xx). The actual settlement runs "
+                    "in a background worker inside Volopay — verify the expense's "
+                    "final settlement_status in Volopay to confirm it settled.")
 
     return {
         "ok": overall_ok,
