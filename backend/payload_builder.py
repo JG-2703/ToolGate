@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 import secrets
 import time
+from datetime import datetime
 from enum import IntEnum
 
 
@@ -126,6 +127,11 @@ def gen_upi_invoice() -> str:
 
 def gen_transfer_balance() -> float:
     return round(random.uniform(100_000, 5_000_000), 2)
+
+
+def gen_txn_time() -> str:
+    """Real PineLabs transactionTime format, e.g. "2021-11-22 17:34:39.234"."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 # ── CARD ───────────────────────────────────────────────────────────────────────
