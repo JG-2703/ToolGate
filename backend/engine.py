@@ -7,7 +7,6 @@ import random
 import time
 from dataclasses import dataclass, field as dc_field
 from collections import defaultdict
-from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
 import httpx
@@ -16,7 +15,7 @@ from metrics import compute_metrics_snapshot
 from payload_builder import (
     build_card_auth, build_card_notification,
     build_upi_auth, build_upi_notification,
-    gen_rrn, gen_txn_unique_id, gen_transaction_id,
+    gen_rrn, gen_txn_unique_id, gen_transaction_id, gen_txn_time,
     TxnType, NOTIF_MESSAGES,
 )
 from airwallex_payload_builder import (
@@ -148,7 +147,7 @@ async def dry_run(config: dict) -> dict:
 
     rrn           = gen_rrn()
     txn_unique_id = gen_txn_unique_id()
-    txn_time      = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+    txn_time      = gen_txn_time()
     results       = {}
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -339,7 +338,7 @@ async def run_load_test(
                 msg_key = "already_cancelled" if child_type in (int(TxnType.REFUND), int(TxnType.UPI_REFUND)) else "success"
                 message = NOTIF_MESSAGES[msg_key]
                 notif_uid = gen_txn_unique_id()
-                txn_time_str = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                txn_time_str = gen_txn_time()
 
                 if parent.payee_vpa:
                     payload = build_upi_notification(
@@ -381,7 +380,7 @@ async def run_load_test(
         eff_type  = _pick_txn_type()
         amount    = _gen_amount()
         txn_uid   = gen_txn_unique_id()
-        txn_time  = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+        txn_time  = gen_txn_time()
 
         if eff_type == "upi":
             payee_vpa   = _pick_payee_vpa()

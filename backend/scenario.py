@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import datetime
 
 import httpx
 
@@ -33,7 +32,7 @@ SETTLE_DELAY_SEC = float(os.environ.get("TOOLGATE_SETTLE_DELAY_SEC", "3.0"))
 from payload_builder import (
     build_card_auth, build_card_notification,
     build_upi_auth, build_upi_notification,
-    gen_rrn, gen_txn_unique_id, gen_approval_code,
+    gen_rrn, gen_txn_unique_id, gen_approval_code, gen_txn_time,
     TxnType,
 )
 
@@ -167,7 +166,7 @@ async def run_scenario(config: dict) -> dict:
                 # Let the async expense-generation job finish before settling.
                 await asyncio.sleep(SETTLE_DELAY_SEC)
                 notif_uid = gen_txn_unique_id()
-                txn_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                txn_time = gen_txn_time()
                 if is_upi:
                     # UPI settle amount is used as-is (rupees) by the backend.
                     payload = build_upi_notification(
@@ -199,7 +198,7 @@ async def run_scenario(config: dict) -> dict:
                 # Space out from the prior settle so its processing completes.
                 await asyncio.sleep(SETTLE_DELAY_SEC)
                 notif_uid = gen_txn_unique_id()
-                txn_time = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                txn_time = gen_txn_time()
                 # Refund type follows card-vs-UPI: 17 for card, 23 for UPI.
                 refund_type = int(TxnType.UPI_REFUND) if is_upi else int(TxnType.REFUND)
                 if is_upi:
