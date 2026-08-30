@@ -17,7 +17,8 @@ const SCENARIOS = [
   {
     id: "decline",
     title: "Decline an expense",
-    blurb: "Authorization expected to be rejected. The card must be configured to decline (block policy / limit).",
+    blurb:
+      "Authorization expected to be rejected. The card must be configured to decline (block policy / limit).",
     steps: "auth (expect decline)",
   },
   {
@@ -57,10 +58,20 @@ function StepCard({ res }) {
   return (
     <div
       className="panel-2"
-      style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}
+      style={{
+        padding: "12px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
     >
       <div
-        style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          cursor: "pointer",
+        }}
         onClick={() => setOpen((o) => !o)}
       >
         {stepDot(res.ok)}
@@ -99,7 +110,9 @@ function StepCard({ res }) {
 function Collapsible({ title, data }) {
   return (
     <div>
-      <div className="label" style={{ marginBottom: 4 }}>{title}</div>
+      <div className="label" style={{ marginBottom: 4 }}>
+        {title}
+      </div>
       <pre
         style={{
           margin: 0,
@@ -126,6 +139,7 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
   const [amount, setAmount] = useState(5000);
   const [cardRef, setCardRef] = useState("");
   const [payeeVpa, setPayeeVpa] = useState("");
+  const [upiCardNumber, setUpiCardNumber] = useState("");
   const [mcc, setMcc] = useState("6011");
   const [merchant, setMerchant] = useState(""); // blank = random
   const [authUrl, setAuthUrl] = useState("");
@@ -151,6 +165,7 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
         merchant_name: merchant,
         card_ref: cardRef,
         payee_vpa: payeeVpa,
+        upi_card_number: upiCardNumber,
         auth_url: authUrl,
         notification_url: notifUrl || null,
       };
@@ -203,7 +218,8 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
           marginBottom: 24,
         }}
       >
-        Pick a scenario, fill the details, and run. The exact PineLabs callbacks fire.
+        Pick a scenario, fill the details, and run. The exact PineLabs callbacks
+        fire.
       </p>
 
       {/* scenario picker */}
@@ -220,13 +236,18 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
           return (
             <button
               key={s.id}
-              onClick={() => { setScenario(s.id); setResult(null); }}
+              onClick={() => {
+                setScenario(s.id);
+                setResult(null);
+              }}
               style={{
                 textAlign: "left",
                 padding: "12px 14px",
                 cursor: "pointer",
                 background: on ? "var(--accent-glow)" : "var(--bg-surface)",
-                border: `1px solid ${on ? "var(--accent)" : "var(--border-subtle)"}`,
+                border: `1px solid ${
+                  on ? "var(--accent)" : "var(--border-subtle)"
+                }`,
                 borderRadius: 4,
               }}
             >
@@ -241,7 +262,13 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
               >
                 {s.title}
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  lineHeight: 1.4,
+                }}
+              >
                 {s.blurb}
               </div>
               <div
@@ -260,7 +287,16 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
       </div>
 
       {/* inputs */}
-      <div className="panel" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14, marginBottom: 20 }}>
+      <div
+        className="panel"
+        style={{
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          marginBottom: 20,
+        }}
+      >
         {/* txn type */}
         <div style={{ display: "flex", gap: 8 }}>
           {["card", "upi"].map((t) => (
@@ -280,50 +316,103 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+        >
           <Labeled label="AMOUNT (₹)">
-            <input className="input" type="number" value={amount}
-              onChange={(e) => setAmount(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
           </Labeled>
           <Labeled label="MCC">
-            <select className="input" value={mcc} onChange={(e) => setMcc(e.target.value)}
-              style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12 }}>
+            <select
+              className="input"
+              value={mcc}
+              onChange={(e) => setMcc(e.target.value)}
+              style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12 }}
+            >
               {MCC_PRESETS.map((m) => (
-                <option key={m.code} value={m.code}>{m.code} — {m.label}</option>
+                <option key={m.code} value={m.code}>
+                  {m.code} — {m.label}
+                </option>
               ))}
             </select>
           </Labeled>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+        >
           {isUpi ? (
             <Labeled label="PAYEE VPA">
-              <input className="input" value={payeeVpa} placeholder="name@upi"
-                onChange={(e) => setPayeeVpa(e.target.value)} spellCheck={false} />
+              <input
+                className="input"
+                value={payeeVpa}
+                placeholder="name@upi"
+                onChange={(e) => setPayeeVpa(e.target.value)}
+                spellCheck={false}
+              />
             </Labeled>
           ) : (
             <Labeled label="CARD REFERENCE">
-              <input className="input" value={cardRef} placeholder="6204430025899918"
-                onChange={(e) => setCardRef(e.target.value)} spellCheck={false} />
+              <input
+                className="input"
+                value={cardRef}
+                placeholder="6204430025899918"
+                onChange={(e) => setCardRef(e.target.value)}
+                spellCheck={false}
+              />
             </Labeled>
           )}
           <Labeled label="MERCHANT (blank = random)">
-            <input className="input" value={merchant} placeholder="RAPIDO"
-              onChange={(e) => setMerchant(e.target.value)} spellCheck={false} />
+            <input
+              className="input"
+              value={merchant}
+              placeholder="RAPIDO"
+              onChange={(e) => setMerchant(e.target.value)}
+              spellCheck={false}
+            />
           </Labeled>
         </div>
+
+        {isUpi && (
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+          >
+            <Labeled label="CARD NUMBER - Wallet ID (blank = default)">
+              <input
+                className="input"
+                value={upiCardNumber}
+                placeholder="6204430026865829"
+                onChange={(e) => setUpiCardNumber(e.target.value)}
+                spellCheck={false}
+              />
+            </Labeled>
+          </div>
+        )}
 
         {showEndpointFields && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Labeled label="AUTH CALLBACK URL">
-              <input className="input" value={authUrl}
+              <input
+                className="input"
+                value={authUrl}
                 placeholder="https://<host>/api/v1/callbacks/pinelabs-authorize"
-                onChange={(e) => setAuthUrl(e.target.value)} spellCheck={false} />
+                onChange={(e) => setAuthUrl(e.target.value)}
+                spellCheck={false}
+              />
             </Labeled>
             <Labeled label="NOTIFICATION CALLBACK URL">
-              <input className="input" value={notifUrl}
+              <input
+                className="input"
+                value={notifUrl}
                 placeholder="https://<host>/api/v1/callbacks/pinelabs-txn-notifications"
-                onChange={(e) => setNotifUrl(e.target.value)} spellCheck={false} />
+                onChange={(e) => setNotifUrl(e.target.value)}
+                spellCheck={false}
+              />
             </Labeled>
           </div>
         )}
@@ -339,9 +428,9 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
               lineHeight: 1.5,
             }}
           >
-            ⚠ A decline can't be forced from the payload. Use an amount above the
-            card/limit, or target a card configured to reject (block policy / low
-            budget) in the controller.
+            ⚠ A decline can't be forced from the payload. Use an amount above
+            the card/limit, or target a card configured to reject (block policy
+            / low budget) in the controller.
           </div>
         )}
       </div>
@@ -351,7 +440,11 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
         onClick={run}
         className="btn btn-primary"
         disabled={busy || !canRun}
-        style={{ width: "100%", padding: "12px", opacity: busy || !canRun ? 0.5 : 1 }}
+        style={{
+          width: "100%",
+          padding: "12px",
+          opacity: busy || !canRun ? 0.5 : 1,
+        }}
       >
         {busy ? "RUNNING SIMULATION…" : "▶  RUN SIMULATION"}
       </button>
@@ -359,9 +452,12 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
       {error && (
         <div
           style={{
-            marginTop: 14, fontSize: 11, color: "var(--danger)",
+            marginTop: 14,
+            fontSize: 11,
+            color: "var(--danger)",
             fontFamily: "JetBrains Mono, monospace",
-            background: "var(--danger-dim)", border: "1px solid var(--danger)",
+            background: "var(--danger-dim)",
+            border: "1px solid var(--danger)",
             padding: "8px 10px",
           }}
         >
@@ -374,34 +470,55 @@ export default function ExpenseSimulatorPage({ showEndpointFields = false }) {
         <div style={{ marginTop: 24 }}>
           <div
             style={{
-              display: "flex", alignItems: "center", gap: 10, marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
             }}
           >
             {stepDot(result.ok)}
             <span
               style={{
-                fontSize: 12, fontFamily: "JetBrains Mono, monospace",
-                fontWeight: 700, color: result.ok ? "var(--ok)" : "var(--danger)",
-                textTransform: "uppercase", letterSpacing: "0.08em",
+                fontSize: 12,
+                fontFamily: "JetBrains Mono, monospace",
+                fontWeight: 700,
+                color: result.ok ? "var(--ok)" : "var(--danger)",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
               }}
             >
               {result.ok
-                ? (scenario === "settle" || scenario === "refund"
-                    ? "Callbacks sent — confirm in Volopay"
-                    : "Simulation succeeded")
+                ? scenario === "settle" || scenario === "refund"
+                  ? "Callbacks sent — confirm in Volopay"
+                  : "Simulation succeeded"
                 : "Simulation did not fully succeed"}
             </span>
             {result.link_key && (
-              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "JetBrains Mono, monospace" }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  fontFamily: "JetBrains Mono, monospace",
+                }}
+              >
                 {result.link_key.type}: {String(result.link_key.value)}
               </span>
             )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {result.steps.map((s, i) => <StepCard key={i} res={s} />)}
+            {result.steps.map((s, i) => (
+              <StepCard key={i} res={s} />
+            ))}
           </div>
           {result.note && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.5 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                marginTop: 12,
+                lineHeight: 1.5,
+              }}
+            >
               {result.note}
             </div>
           )}

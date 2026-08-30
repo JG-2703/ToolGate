@@ -175,6 +175,7 @@ async def run_scenario(config: dict) -> dict:
                         upi_type, mcc,
                         txn_type=int(TxnType.DEBIT), reason_code=0,
                         message="Transaction successful.",
+                        card_number=upi_card_number,
                     )
                     # UPI settle requires approvalCode (else auto-reverses).
                     payload["transactionDetail"]["approvalCode"] = approval_code
@@ -208,6 +209,7 @@ async def run_scenario(config: dict) -> dict:
                         upi_type, mcc,
                         txn_type=refund_type, reason_code=0,
                         message="Transaction is already cancelled.",
+                        card_number=upi_card_number,
                     )
                     if merchant:
                         payload["merchantDetail"]["merchantName"] = merchant

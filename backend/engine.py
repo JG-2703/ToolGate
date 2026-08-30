@@ -183,7 +183,8 @@ async def dry_run(config: dict) -> dict:
             else:
                 notif_uid = gen_txn_unique_id()
                 if txn_type == "upi":
-                    payload = build_upi_notification(payee_vpa, amount, txn_unique_id, notif_uid, txn_time, upi_type, upi_mcc)
+                    payload = build_upi_notification(payee_vpa, amount, txn_unique_id, notif_uid, txn_time, upi_type, upi_mcc,
+                                                      card_number=upi_card_number)
                 else:
                     payload = build_card_notification(card_ref, rrn, amount, txn_unique_id, notif_uid, txn_time, card_mcc)
                 t0 = time.monotonic()
@@ -346,6 +347,7 @@ async def run_load_test(
                         parent.payee_vpa, parent.amount, parent.txn_unique_id,
                         notif_uid, txn_time_str, upi_type, parent.mcc,
                         txn_type=child_type, reason_code=reason_code, message=message,
+                        card_number=upi_card_number,
                     )
                 else:
                     payload = build_card_notification(
@@ -458,7 +460,8 @@ async def run_load_test(
                 return
             notif_uid = gen_txn_unique_id()
             if eff_type == "upi":
-                payload = build_upi_notification(payee_vpa, amount, txn_uid, notif_uid, txn_time, upi_type, eff_mcc)
+                payload = build_upi_notification(payee_vpa, amount, txn_uid, notif_uid, txn_time, upi_type, eff_mcc,
+                                                  card_number=upi_card_number)
             else:
                 payload = build_card_notification(card_ref, rrn, amount, txn_uid, notif_uid, txn_time, eff_mcc)
 
