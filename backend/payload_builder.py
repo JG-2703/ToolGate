@@ -316,6 +316,7 @@ def build_upi_notification(
     txn_type: int = 2,
     reason_code: int = 0,
     message: str = "Transaction successful.",
+    card_number: str = "6204430026865829",
 ) -> dict:
     """UPI notification payload. amount in rupees (same as auth — no conversion)."""
     embedded_rrn = gen_rrn()
@@ -326,7 +327,7 @@ def build_upi_notification(
     return {
         "accountDetails": None,
         "cardDetail": {
-            "cardNumber": "6204430026865829",
+            "cardNumber": card_number,
             "expenseCategory": None,
             "expenseCategoryService": None,
             "externalAccountNumber": None,
